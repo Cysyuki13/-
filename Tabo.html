@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>大口仔打地鼠遊戲</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            background-color: #fff9e6; 
+            overflow: hidden;
+        }
+        
+        .hole {
+            position: relative;
+            overflow: hidden;
+            background: #8b4513;
+            border-bottom: 12px solid #5d2e0d;
+            border-radius: 50%;
+            box-shadow: inset 0 15px 0 rgba(0,0,0,0.4);
+            aspect-ratio: 1 / 1;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+        }
+
+        .tabo {
+            position: absolute;
+            top: 100%;
+            width: 90%;
+            height: 95%;
+            transition: top 0.12s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            cursor: pointer;
+            z-index: 10;
+            display: flex;
+            justify-content: center;
+            align-items: flex-end;
+        }
+
+        .tabo.up {
+            top: 5%;
+        }
+
+        .tabo.hit {
+            transform: scale(0.8) rotate(15deg);
+            filter: brightness(0.7) sepia(0.5);
+        }
+
+        .score-pop {
+            position: absolute;
+            font-weight: 900;
+            color: #ff3366;
+            font-size: 1.5rem;
+            pointer-events: none;
+            animation: float-up 0.6s ease-out forwards;
+            z-index: 60;
+            text-shadow: 2px 2px 0 white;
+        }
+
+        .star-particle {
+            position: absolute;
+            pointer-events: none;
+            z-index: 70;
+            animation: star-burst 0.7s cubic-bezier(0.1, 0.8, 0.3, 1) forwards;
+        }
+
+        /* Fever Effect */
+        .fever-border {
+            animation: fever-glow 0.5s ease-in-out infinite alternate;
+            border-color: #ffeb3b !important;
+        }
+
+        @keyframes fever-glow {
+            0% { box-shadow: 0 0 10px #ffeb3b, inset 0 0 5px #ffeb3b; transform: scale(1); }
+            100% { box-shadow: 0 0 30px #f44336, inset 0 0 15px #f44336; transform: scale(1.02); }
+        }
+
+        @keyframes star-burst {
+            0% { transform: translate(0, 0) rotate(0deg) scale(0); opacity: 1; }
+            100% { transform: translate(var(--tw-tx), var(--tw-ty)) rotate(var(--tw-tr)) scale(1); opacity: 0; }
+        }
+
+        @keyframes float-up {
+            0% { transform: translateY(0); opacity: 1; }
+            100% { transform: translateY(-60px); opacity: 0; }
+        }
+
+        #game-board {
+            transition: transform 0.05s ease-in-out, border-color 0.3s;
+        }
+
+        svg {
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body class="flex flex-col items-center justify-center min-h-screen p-4 font-sans text-gray-800">
+
+    <!-- Header UI -->
+    <div class="w-full max-w-md bg-white rounded-3xl p-5 shadow-xl mb-6 flex justify-between items-center border-4 border-blue-100">
+        <div class="text-center">
+            <p class="text-xs uppercase font-black text-blue-300">得分</p>
+            <p id="score" class="text-4xl font-black text-blue-600">0</p>
+        </div>
+        <div class="text-center">
+            <h1 class="text-xl font-black text-red-500 tracking-tight">大口仔打地鼠</h1>
+            <button id="start-btn" class="mt-2 px-8 py-2 bg-red-500 text-white rounded-full font-black shadow-lg active:translate-y-1 transition-all">
+                開始遊戲
+            </button>
+        </div>
+        <div class="text-center">
+            <p class="text-xs uppercase font-black text-red-200">時間</p>
+            <p id="timer" class="text-4xl font-black text-red-500">30秒</p>
+        </div>
+    </div>
+
+    <!-- Game Board -->
+    <div class="grid grid-cols-3 gap-3 w-full max-w-md bg-green-400 p-4 rounded-[2.5rem] shadow-2xl border-b-[12px] border-green-600" id="game-board">
+        <!-- 9 holes generated via JS -->
+    </div>
+
+    <!-- Game Over Modal -->
+    <div id="game-over-modal" class="fixed inset-0 bg-black/70 hidden flex items-center justify-center z-50 p-6 backdrop-blur-sm">
+        <div class="bg-white rounded-[3rem] p-10 w-full max-w-xs text-center shadow-2xl transform scale-90 opacity-0 transition-all duration-300 border-8 border-yellow-400" id="modal-content">
+            <h2 class="text-4xl font-black text-red-500 mb-2 italic underline decoration-yellow-400">遊戲結束!</h2>
+            <div class="my-6">
+                <p class="text-gray-400 font-bold uppercase text-sm">最後總分</p>
+                <p id="final-score" class="text-7xl font-black text-blue-600">0</p>
+            </div>
+            <button id="restart-btn" class="w-full py-4 bg-blue-600 text-white rounded-2xl font-black text-xl shadow-[0_6px_0_#1e40af] active:shadow-none active:translate-y-1 transition-all">
+                再試一次
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- Sound Engine ---
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        function playSound(freq, type, duration, volume = 0.1) {
+            const oscillator = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            oscillator.type = type;
+            oscillator.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            oscillator.frequency.exponentialRampToValueAtTime(freq / 2, audioCtx.currentTime + duration);
+            gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+            oscillator.connect(gain);
+            gain.connect(audioCtx.destination);
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + duration);
+        }
+
+        const sounds = {
+            hit: () => playSound(600, 'triangle', 0.15, 0.2),
+            fever: () => {
+                playSound(523.25, 'sine', 0.1, 0.15); // C5
+                setTimeout(() => playSound(659.25, 'sine', 0.1, 0.15), 100); // E5
+                setTimeout(() => playSound(783.99, 'sine', 0.2, 0.15), 200); // G5
+            },
+            start: () => {
+                playSound(440, 'sine', 0.1, 0.1);
+                setTimeout(() => playSound(880, 'sine', 0.2, 0.1), 100);
+            },
+            gameOver: () => {
+                playSound(300, 'sawtooth', 0.5, 0.1);
+                setTimeout(() => playSound(200, 'sawtooth', 0.5, 0.1), 200);
+            },
+            tick: () => playSound(1000, 'sine', 0.05, 0.05)
+        };
+
+        const taboContent = `
+        <svg viewBox="0 0 100 130" xmlns="http://www.w3.org/2000/svg">
+            <path class="hit-fx" d="M50 15 L55 35 L75 30 L60 45 L80 60 L60 65 L70 85 L50 75 L30 85 L40 65 L20 60 L40 45 L25 30 L45 35 Z" 
+                  fill="#FFD700" stroke="#FF8C00" stroke-width="2" opacity="0" transform="scale(0.5)" transform-origin="center"/>
+            <path d="M20 58 Q15 55 15 50 Q15 45 20 45 Q25 15 50 15 Q75 15 80 45 Q85 45 85 50 Q85 55 80 55 Q75 85 50 85 Q25 85 20 55 Z"
+                  fill="#FFE0BD" stroke="#001f3f" stroke-width="3.5" stroke-linejoin="round" />
+            <path d="M29 28 L36 18 L34 24 L46 17 L44 24 L56 17 L54 24 L66 16"
+                  fill="none" stroke="#001f3f" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" />
+            <path d="M30 44 Q34 36 38 42" fill="none" stroke="#001f3f" stroke-width="4" stroke-linecap="round" transform="rotate(-15, 38, 44)" />
+            <path d="M62 42 Q66 36 70 44" fill="none" stroke="#001f3f" stroke-width="4" stroke-linecap="round" transform="rotate(15, 62, 44)" />
+            <path d="M52 44 Q49 44 49 47 Q49 50 52 50" fill="none" stroke="#001f3f" stroke-width="4" stroke-linecap="round" />
+            <ellipse class="mouth-normal" cx="50" cy="67" rx="14" ry="11" fill="white" stroke="#001f3f" stroke-width="4.5" />
+            <path class="mouth-hit" d="M38 72 Q50 78 62 72" fill="none" stroke="#001f3f" stroke-width="5" stroke-linecap="round" opacity="0" />
+            <path d="M15 85 L0 70" stroke="#FFE0BD" stroke-width="12" stroke-linecap="round" />
+            <path d="M85 85 L100 70" stroke="#FFE0BD" stroke-width="12" stroke-linecap="round" />
+            <path d="M15 90 L10 86 L3 80 L11 72 L27 86 L73 86 L80 80 L90 71 L100 80 L87 90 L87 130 L15 130 Z" 
+                  fill="#FF2D55" stroke="#001f3f" stroke-width="4.5" stroke-linejoin="round"></path>
+        </svg>`;
+
+        const board = document.getElementById('game-board');
+        const scoreBoard = document.getElementById('score');
+        const timerDisplay = document.getElementById('timer');
+        const startBtn = document.getElementById('start-btn');
+        const modal = document.getElementById('game-over-modal');
+        const modalContent = document.getElementById('modal-content');
+        const finalScoreDisplay = document.getElementById('final-score');
+        const restartBtn = document.getElementById('restart-btn');
+
+        let score = 0;
+        let timeUp = false;
+        let countdown;
+        let feverTimeout;
+
+        // Generate holes
+        for (let i = 0; i < 9; i++) {
+            const hole = document.createElement('div');
+            hole.classList.add('hole');
+            const tabo = document.createElement('div');
+            tabo.classList.add('tabo');
+            tabo.innerHTML = taboContent;
+            const handleHit = (e) => whack(e, tabo);
+            tabo.addEventListener('mousedown', handleHit);
+            tabo.addEventListener('touchstart', (e) => { e.preventDefault(); handleHit(e); });
+            hole.appendChild(tabo);
+            board.appendChild(hole);
+        }
+
+        const holes = document.querySelectorAll('.hole');
+
+        function randomTime(min, max) { return Math.round(Math.random() * (max - min) + min); }
+        
+        function peep() {
+            if (timeUp) return;
+            
+            // Randomly decide to spawn 1 or 2 moles at once
+            const count = Math.random() > 0.7 ? 2 : 1;
+            const availableHoles = Array.from(holes).filter(h => !h.querySelector('.tabo').classList.contains('up'));
+            
+            for (let i = 0; i < Math.min(count, availableHoles.length); i++) {
+                const idx = Math.floor(Math.random() * availableHoles.length);
+                const hole = availableHoles.splice(idx, 1)[0];
+                const tabo = hole.querySelector('.tabo');
+                
+                tabo.classList.remove('hit');
+                tabo.querySelector('.hit-fx').style.opacity = "0";
+                tabo.querySelector('.mouth-normal').style.opacity = "1";
+                tabo.querySelector('.mouth-hit').style.opacity = "0";
+                tabo.classList.add('up');
+
+                const upTime = randomTime(700, 1200);
+                setTimeout(() => {
+                    tabo.classList.remove('up');
+                }, upTime);
+            }
+
+            // Schedule next wave
+            setTimeout(peep, randomTime(500, 1000));
+        }
+
+        function createStarParticle(x, y) {
+            const star = document.createElement('div');
+            star.className = 'star-particle';
+            const tx = (Math.random() - 0.5) * 200;
+            const ty = (Math.random() - 0.5) * 200 - 50; 
+            const tr = (Math.random() - 0.5) * 500;
+            star.style.setProperty('--tw-tx', `${tx}px`);
+            star.style.setProperty('--tw-ty', `${ty}px`);
+            star.style.setProperty('--tw-tr', `${tr}deg`);
+            star.style.left = `${x}px`;
+            star.style.top = `${y}px`;
+            star.innerHTML = `<svg width="30" height="30" viewBox="0 0 24 24" fill="#FFD700" stroke="#B8860B"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14l-5-4.87 6.91-1.01L12 2z"/></svg>`;
+            document.body.appendChild(star);
+            setTimeout(() => star.remove(), 700);
+        }
+
+        function triggerFever() {
+            clearTimeout(feverTimeout);
+            board.classList.add('fever-border');
+            sounds.fever();
+            feverTimeout = setTimeout(() => {
+                board.classList.remove('fever-border');
+            }, 1500);
+        }
+
+        function whack(e, element) {
+            if (!element.classList.contains('up') || element.classList.contains('hit')) return;
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            
+            sounds.hit();
+            score++;
+            scoreBoard.textContent = score;
+
+            // Fever logic: every 5 hits
+            if (score % 5 === 0) {
+                triggerFever();
+            }
+
+            element.classList.remove('up');
+            element.classList.add('hit');
+
+            const pageX = e.pageX || (e.touches ? e.touches[0].pageX : 0);
+            const pageY = e.pageY || (e.touches ? e.touches[0].pageY : 0);
+
+            for (let i = 0; i < 6; i++) createStarParticle(pageX, pageY);
+
+            const star = element.querySelector('.hit-fx');
+            const mouthNormal = element.querySelector('.mouth-normal');
+            const mouthHit = element.querySelector('.mouth-hit');
+            if (star) { star.style.opacity = "1"; star.style.transform = "scale(1.3)"; }
+            if (mouthNormal) mouthNormal.style.opacity = "0";
+            if (mouthHit) mouthHit.style.opacity = "1";
+            
+            board.style.transform = `translate(${Math.random() * 10 - 5}px, ${Math.random() * 10 - 5}px)`;
+            setTimeout(() => board.style.transform = 'translate(0,0)', 50);
+            
+            const pop = document.createElement('div');
+            pop.className = 'score-pop';
+            pop.innerText = '打中！';
+            pop.style.left = `${pageX - 40}px`;
+            pop.style.top = `${pageY - 40}px`;
+            document.body.appendChild(pop);
+            setTimeout(() => pop.remove(), 600);
+            
+            if (window.navigator && window.navigator.vibrate) { window.navigator.vibrate(50); }
+        }
+
+        function startGame() {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            sounds.start();
+            
+            score = 0;
+            scoreBoard.textContent = 0;
+            timeUp = false;
+            board.classList.remove('fever-border');
+            modal.classList.add('hidden');
+            modalContent.classList.remove('scale-100', 'opacity-100');
+            startBtn.disabled = true;
+            startBtn.style.opacity = '0.5';
+            
+            peep();
+            
+            let timeLeft = 30;
+            timerDisplay.textContent = `${timeLeft}秒`;
+            clearInterval(countdown);
+            countdown = setInterval(() => {
+                timeLeft--;
+                timerDisplay.textContent = `${timeLeft}秒`;
+                if (timeLeft <= 5 && timeLeft > 0) sounds.tick();
+                if (timeLeft <= 0) {
+                    clearInterval(countdown);
+                    endGame();
+                }
+            }, 1000);
+        }
+
+        function endGame() {
+            sounds.gameOver();
+            timeUp = true;
+            board.classList.remove('fever-border');
+            startBtn.disabled = false;
+            startBtn.style.opacity = '1';
+            finalScoreDisplay.textContent = score;
+            modal.classList.remove('hidden');
+            setTimeout(() => { modalContent.classList.add('scale-100', 'opacity-100'); }, 50);
+        }
+
+        startBtn.addEventListener('click', startGame);
+        restartBtn.addEventListener('click', startGame);
+    </script>
+</body>
+</html>
